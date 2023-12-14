@@ -34,14 +34,33 @@ public class WSStreamedCaller {
         return new Builder();
     }
 
-    public void call() throws WSStreamException {
-        URLConnection con = null;
+    public Connection prepare() throws WSStreamException {
+        HttpURLConnection con;
         OutputStream outputStream = null;
         InputStream responseStream = null;
         InputStream errorStream = null;
         try {
             URL url = new URL(this.url);
-            con = url.openConnection();
+            con = (HttpURLConnection) url.openConnection();
+            configurator.configure(con);
+            con.connect();
+            if (con.getDoOutput()) {
+                outputStream = con.getOutputStream();
+            }
+            return new Connection(con, outputStream);
+        } catch (Exception ex) {
+            throw new WSStreamException("Exception while calling api", ex);
+        }
+    }
+
+    public void call() throws WSStreamException {
+        HttpURLConnection con = null;
+        OutputStream outputStream = null;
+        InputStream responseStream = null;
+        InputStream errorStream = null;
+        try {
+            URL url = new URL(this.url);
+            con = (HttpURLConnection) url.openConnection();
             configurator.configure(con);
             con.connect();
             if (con.getDoOutput()) {
@@ -49,18 +68,14 @@ public class WSStreamedCaller {
                 requestWriter.write(outputStream);
                 outputStream.close();
             }
-            if (con instanceof HttpURLConnection) {
-                HttpURLConnection httpCon = ((HttpURLConnection) con);
-                int resCode = ((HttpURLConnection) con).getResponseCode();
-                if (resCode < 400) {
-                    responseStream = httpCon.getInputStream();
-                } else {
-                    errorStream = httpCon.getErrorStream();
-                }
-                responseReader.read(resCode, responseStream, errorStream);
+            int resCode = con.getResponseCode();
+            if (resCode < 400) {
+                responseStream = con.getInputStream();
             } else {
-                throw new RuntimeException("Other than http protocol isn't handled");
+                errorStream = con.getErrorStream();
             }
+            responseReader.read(resCode, responseStream, errorStream);
+
         } catch (Exception ex) {
             throw new WSStreamException("Exception while calling api", ex);
         } finally {
@@ -74,8 +89,8 @@ public class WSStreamedCaller {
                 if (errorStream != null) {
                     errorStream.close();
                 }
-                if (con instanceof HttpURLConnection) {
-                    ((HttpURLConnection) con).disconnect();
+                if (con != null) {
+                    con.disconnect();
                 }
             } catch (Exception ex) {
                 ex.printStackTrace();
@@ -89,7 +104,10 @@ public class WSStreamedCaller {
         private RequestWriter requestWriter;
         private ResponseReader responseReader;
 
-        public Builder url(String url) {
+        public Builder url(String url) throws WSStreamException {
+            if (!url.startsWith("http")) {
+                throw new WSStreamException("URL doesn't start with `http` protocol");
+            }
             this.url = url;
             return this;
         }
